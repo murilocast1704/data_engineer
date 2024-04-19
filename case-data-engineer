@@ -1,0 +1,120 @@
+##Importando a biblioteca de todas as funções de Pyspark e SQL.
+from pyspark.sql.functions import * 
+-----------------------------------------------------------------------------------------------
+
+## Subindo arquivo CSV e visualizando os dados com os relacionamentos entre sensores e equipamentos
+equipment_sensors_csv_df = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/murilocastilho3@gmail.com/equipment_sensors.csv")
+display(equipment_sensors_csv_df)
+
+-----------------------------------------------------------------------------------------------
+## Subindo arquivo JSON e visualizando os dados do equipamento.
+equipment_json_df = spark.read.json("dbfs:/FileStore/shared_uploads/murilocastilho3@gmail.com/equipment.json", multiLine=True)
+display(equipment_json_df)
+
+## Anotação - ao tentar subir o arquivo JSON estava dando retorno de (df2:pyspark.sql.dataframe.DataFrame_corrupt_record:string) linha corrompida. Isso é gerado porque o arquivo Json está multilinhas e o Spark nao consegue ler o arquivo que esta identado em multiplas linhas ele espera estar identado tudo numa linha só.
+
+-----------------------------------------------------------------------------------------------
+
+## Visualizando arquivo TXT - denominado arquivo de log
+arquivo_txt = "dbfs:/FileStore/shared_uploads/murilocastilho3@gmail.com/equpment_failure_sensors.txt"
+equip_fail_sensors_df = spark.read.text(arquivo_txt)
+equip_fail_sensors_df.show(truncate=False)
+
+-----------------------------------------------------------------------------------------------
+
+## Tratando o arquivo txt
+df = spark.read.text("dbfs:/FileStore/shared_uploads/murilocastilho3@gmail.com/equpment_failure_sensors.txt")
+df = df.withColumn("date",regexp_extract(df["value"], r'(\d{04}[-/]\d{1,2}[-/]\d{1,2})', 1))
+df = df.withColumn("tipo", regexp_extract(df["value"], r'\]\s*(\w+)',1))
+df = df.withColumn("sensor_id", regexp_extract(df["value"], r'sensor\[(.*?)\]', 1))
+df = df.withColumn("temperature", regexp_extract(df["value"], r'temperature\s+([\d.]+)', 1))
+df = df.withColumn("vibration", regexp_extract(df["value"], r'vibration\s+([\d.-]+)', 1))
+
+display(df)
+-----------------------------------------------------------------------------------------------
+
+## Joins
+
+# Join entre o CSV e o JSON.
+join_csv_json_df = equipment_json_df.join(equipment_sensors_csv_df, equipment_json_df.equipment_id == equipment_sensors_csv_df.equipment_id,"inner")
+
+# Join geral
+join_geral_df = df.join(join_csv_json_df,df.sensor_id == join_csv_json_df.sensor_id,"inner")
+
+# resultado
+display(join_geral_df)
+-----------------------------------------------------------------------------------------------
+## Perguntas
+
+## 1 - Falhas totais de equipamentos que aconteceram?
+
+# filtrar os erros
+df1 = join_geral_df.filter(join_geral_df.tipo == "ERROR")
+
+# contagem dos erros
+total_erro_df = df1.count()
+
+# resultado
+display(total_erro_df)
+-----------------------------------------------------------------------------------------------
+
+ ## 2 - Qual nome de equipamento teve mais falhas?
+
+ # filtrar os erros
+df2 = join_geral_df.filter(join_geral_df.tipo == "ERROR")
+
+# agrupar por nome do equipamento e contar ocorrências
+count_df = df2.groupBy("name").count()
+
+# ordenar os resultados
+order_df = count_df.orderBy(desc("count"))
+
+# resultado 
+display(order_df)
+
+# resultado final de acordo com a analise Name: 2C195700	Total: 343800
+-----------------------------------------------------------------------------------------------
+## 3 - Quantidade média de falhas em todos os grupos de equipamentos, ordenada pelo número de falhas em ordem crescente?
+
+# filtrar os erros
+df3 = join_geral_df.filter(join_geral_df.tipo == "ERROR")
+
+# agrupando por 'group_name' e contando as falhas
+group_df = df3.groupBy("group_name").agg(count("*").alias("num_failures"))
+
+# calculando média
+media_df = group_df.select(avg("num_failures").alias("avg_failures"))
+
+# resultado média
+display(media_df)
+
+# ordenando
+order_df3 = group_df.orderBy("num_failures")
+
+# mostrando resultado
+display(order_df3)
+-----------------------------------------------------------------------------------------------
+## 4 - Classifique os sensores que apresentam maior número de erros por nome de equipamento em um grupo de equipamentos.
+
+# filtrar os erros
+df4 = join_geral_df.filter(join_geral_df.tipo == "ERROR")
+
+# agrupando e contando as falhas
+errors_by_sensor = df4.groupBy("group_name", "name").agg(count("*").alias("num_erro"))
+
+# ordenando os resultados 
+erros_df = errors_by_sensor.orderBy("group_name", "name", col("num_erro").desc())
+
+# mostrando os resultados
+erros_df.show()
+----------------------------------------------------------------------------------------------
+## questao extra 5 - total de sensores com tipo "Warning"
+
+# filtrando "WARNING"
+df4 = join_geral_df.filter(join_geral_df.tipo == "WARNING")
+
+## realizando contagem
+count_df_test = df4.count()
+
+## resultado
+display(count_df_test)
